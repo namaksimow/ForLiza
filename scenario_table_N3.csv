@@ -1,0 +1,7 @@
+Pref1_pos,Pref2_pos,Pref3_pos,scenario,name
+1,2,3,1,TRT
+1,3,2,2,TRT
+2,1,3,3,WLB
+2,3,1,4,SLB
+3,1,2,5,CMPLB
+3,2,1,6,CMP
