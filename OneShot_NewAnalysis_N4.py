@@ -4,44 +4,36 @@ Created on Fri Aug 17 11:16:03 2018
 
 @author: Adam
 """
-import numbers
+
 import numpy as np
 import pandas as pd
-import sklearn
-from scipy.stats import kurtosis
-from scipy.stats import skew
-from keras.layers import Input, Dense
-from keras.models import Model
-
 from sklearn.ensemble.forest import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neural_network import MLPClassifier
+from sklearn.feature_selection import RFE
 
 from datetime import datetime
 # Model and feature selection
-from sklearn.feature_selection import SelectKBest
 from sklearn.model_selection import KFold
-from sklearn.feature_selection import chi2
 # Classification metrics
 from sklearn.metrics import f1_score
 from sklearn.metrics import precision_score
 from sklearn.metrics import recall_score
 from sklearn.metrics import accuracy_score
 
-from sklearn import preprocessing
 from PersonalClassifier import PersonalClassifier
 from sklearn.ensemble import AdaBoostClassifier
-from sklearn.ensemble import VotingClassifier
 from sklearn.svm import SVC
 from sklearn.linear_model import logistic
 from OneShotFeatureGenerator import OneShotStaticFeatureGenerator
 from OneShotFeatureGenerator import OneShotDynamicFeatureGenerator
 from OneShotDataPreperation import OneShotDataPreparation
 from OrdinalClassifier import OrdinalClassifier
-from BaselineModel import DecisionTreeBaseline
-from BayesRuleModel import BayesRuleClassifier
-from LikelihoodModel import LHClassifier
-from MaximumLikelihoodModel import MLHClassifier
+from ExpertModels import DecisionTreeBaseline
+from sklearn.ensemble import ExtraTreesClassifier
+from sklearn.ensemble import GradientBoostingClassifier
+
+from sklearn.model_selection import train_test_split
 
 def _convert_prediction(X, column_name, n_candidates):
     X.loc[X[column_name]==1,"Vote_"+column_name] = X.loc[X[column_name]==1,"Pref1"]
@@ -73,13 +65,37 @@ def _get_loo_folds(X):
 
 def _get_k_folds(X,k):
     folds = list()
-    kf = KFold(k, shuffle=True, random_state=1)  # 10 fold cross validation
-    for train_indices, test_indices in kf.split(X):
-        folds.append(test_indices)
+    if k == 1:
+        folds.append(X.index.tolist())
+    else:
+        kf = KFold(k, shuffle=True, random_state=1)  # 10 fold cross validation
+        for train_indices, test_indices in kf.split(X):
+            folds.append(X.iloc[test_indices].RoundIndex)
     return folds
 
-def _evaluation(raw_data, clfs, target, folds, scenario_filter, action_table_df, scenarios_df, n_candidates = 3):
+def _select_features(features_train, targets_train, features_ext_df):
+    #feature importance
+    feature_importance = pd.DataFrame()
+
+    rf_for_fs = RandomForestClassifier(n_estimators=100)
+    rf_for_fs.fit(X=features_train.values, y=targets_train)
+    current_feature_importances = pd.DataFrame(rf_for_fs.feature_importances_,
+                                               index=features_ext_df.columns,
+                                               columns=['importance']).sort_values('importance',
+                                                                                   ascending=False)
+    if len(feature_importance) == 0:
+        feature_importance = current_feature_importances
+    else:
+        feature_importance['importance'] = feature_importance['importance'] + current_feature_importances['importance']
+
+    feature_importance['importance_percentage'] = feature_importance['importance']/np.max(feature_importance['importance'])
+    selected_comlumns = feature_importance.iloc[[feature_importance['importance_percentage']>0.2],].index.tolist()
+    return selected_comlumns
+
+
+def _evaluation(raw_data, clfs, target, folds, scenario_filter, action_table_df, scenarios_df,n_candidates = 3):
     data = raw_data.copy()
+    data = data.drop(["Vote"], axis=1)
 
     oneshot_static_fg = OneShotStaticFeatureGenerator(action_table_df, scenarios_df, n_candidates)
     oneshot_dyn_fg = OneShotDynamicFeatureGenerator(action_table_df, scenarios_df, n_candidates)
@@ -89,11 +105,10 @@ def _evaluation(raw_data, clfs, target, folds, scenario_filter, action_table_df,
 
     n_folds = len(folds)
 
-
     results_df = pd.DataFrame(columns=['Classifier','FOLD','PRECISION','RECALL','F_MEASURE','ACCURACY'])
 
     prediction = pd.DataFrame(np.matrix([]))
-    feature_importances = pd.DataFrame()
+
     features_train = pd.DataFrame()
     # 10 fold cross validation
     for i in range(0,len(folds)):
@@ -102,15 +117,19 @@ def _evaluation(raw_data, clfs, target, folds, scenario_filter, action_table_df,
         # Split into features and target
         features_df, target_df = data.drop([target], axis=1),data[target]
 
-        test_indices = data.index[[x[1].RoundIndex in folds[i] for x in data.iterrows()]].tolist()
-        train_indices =  data.index[[not (x[1].RoundIndex in folds[i] or x[1].Scenario == scenario_filter) for x in data.iterrows()]].tolist()
+        if n_folds == 1: #Upperbound case
+            test_indices = data.index.tolist()
+            train_indices = data.index.tolist()
+        else:
+            test_indices = data.index[[x[1].RoundIndex in folds[i].tolist() for x in data.iterrows()]].tolist()
+            train_indices = data.index[[not (x[1].RoundIndex in folds[i].tolist()) for x in data.iterrows()]].tolist()
          # Feature Generation
         features_train = features_df.loc[[ii for ii in train_indices],]
         targets_train = target_df[[ii for ii in train_indices]]
-        features_ext_df = oneshot_dyn_fg._dynamic_feature_generation(features_df, features_train , targets_train)
-        features_ext_df = features_ext_df.drop(["Vote"], axis=1)
+        features_ext_df = oneshot_dyn_fg._dynamic_feature_generation(features_df, features_train, targets_train)
+#        features_ext_df = features_ext_df.drop(["Vote"], axis=1)
         # encoding the dataframes
-        features_encoded_df = OneShotDataPreparation._prepare_dataset(features_ext_df)
+        features_encoded_df = OneShotDataPreparation._prepare_dataset(features_ext_df.copy())
         target_encoded_df = target_df
         # make training and testing datasets
         features_train = features_encoded_df.loc[[ii for ii in train_indices],]
@@ -118,29 +137,28 @@ def _evaluation(raw_data, clfs, target, folds, scenario_filter, action_table_df,
         targets_train = target_encoded_df[[ii for ii in train_indices]]
         targets_test = target_encoded_df[[ii for ii in test_indices]]
 
+        # select features
+        #selected_columns = _select_features(features_train, targets_train, features_ext_df)
+
         for j in range(0,len(clfs)):
             clf = clfs[j]
             clf_name = str(clf).split("(")[0]
-            if i == 0:
-                #Initialize metrics
-                results_df.loc[j] = [str(clf), i + 1,0, 0, 0, 0]
+            # if i == 0:
+            #     #Initialize metrics
+            #     results_df.loc[j] = [str(clf), i + 1,0, 0, 0, 0]
+
 
             # Train
-            clf.fit(X = features_train.as_matrix(), y = targets_train)
-            # Test
-            predicated = clf.predict(features_test.as_matrix())
+            clf.fit(X=features_train.values, y=targets_train)
 
-            # #feature importance
-            # current_feature_importances = pd.DataFrame(clf.feature_importances_,
-            #                                            index=features_ext_df.columns,
-            #                                            columns=['importance']).sort_values('importance',
-            #                                                                                ascending=False)
-            # if len(feature_importances) == 0:
-            #     feature_importances = current_feature_importances
-            # else:
-            #     feature_importances['importance'] = feature_importances['importance'] + current_feature_importances['importance']
-            #
-            # print(feature_importances)
+            if "DecisionTreeBaseline" in clf_name:
+                features_ext_df.to_csv("datasets/oneshot/test_features.csv")
+                targets_test.to_csv("datasets/oneshot/test_target.csv")
+                predicated = clf.predict(features_ext_df.loc[[ii for ii in test_indices],])
+            else:
+                # Test
+                predicated = clf.predict(features_test.values)
+
 
             #aggregate results
             if len(prediction) == 0:
@@ -154,14 +172,12 @@ def _evaluation(raw_data, clfs, target, folds, scenario_filter, action_table_df,
 
             print(str(clf) +": F_score = " + str(f1_score(targets_test, predicated, average='weighted')))
             # Measures
-            results_df.iloc[j + i, 1] = results_df.iloc[j + i, 1] + precision_score(targets_test, predicated, average='weighted')
-            results_df.iloc[j + i, 2] = results_df.iloc[j + i, 2] + recall_score(targets_test, predicated, average='weighted')
-            results_df.iloc[j + i, 3] = results_df.iloc[j + i, 3] + f1_score(targets_test, predicated, average='weighted')
-            results_df.iloc[j + i, 4] = results_df.iloc[j + i, 4] + accuracy_score(targets_test, predicated)
+
+            results_df.loc[i*len(clfs) + j] = [str(clf), i + 1, precision_score(targets_test, predicated, average='weighted'),  recall_score(targets_test, predicated, average='weighted'), f1_score(targets_test, predicated, average='weighted'), accuracy_score(targets_test, predicated)]
 
             # if i == n_folds - 1:
             #     results_df.iloc[j, 1] = results_df.iloc[j, 1]/n_folds
-            #     results_df.iloc[j, 2] = results_df.iloc[j, 2]/n_folds
+            #      results_df.iloc[j, 2] = results_df.iloc[j, 2]/n_folds
             #     results_df.iloc[j, 3] = results_df.iloc[j, 3]/n_folds
             #     results_df.iloc[j, 4] = results_df.iloc[j, 4]/n_folds
 
@@ -182,9 +198,66 @@ def _build_data_by_folds(data, folds):
             transformed_data = pd.concat([transformed_data, fold_df])
     return transformed_data
 
-def _load_and_run(datasets, load_folds, classifiers, n_candidates, scenarios = ['NONE'], is_loo = False, n_folds = 10):
-    actions_table = pd.read_csv("datasets/oneshot/action_table_N"+str(n_candidates)+".csv")
-    scenarios_table = pd.read_csv("datasets/oneshot/scenario_table_N"+str(n_candidates)+".csv")
+def _get_classifiers(df, n_candidates):
+    neural_net_cf = MLPClassifier(hidden_layer_sizes = (50), max_iter = 500, random_state=1)
+    two_layer_nn_cf = MLPClassifier(hidden_layer_sizes = (50,30), max_iter = 500, random_state=1)
+    three_layer_nn_cf = MLPClassifier(hidden_layer_sizes = (50,30,20), max_iter = 500, random_state=1)
+    nn_cf_2 = MLPClassifier(hidden_layer_sizes=(90), max_iter=500, random_state=1)
+    nn_cf_3 = MLPClassifier(hidden_layer_sizes=(20), max_iter=500, random_state=1)
+    rf_clf1 = RandomForestClassifier(n_estimators=20, random_state=1)
+    rf_clf2 = RandomForestClassifier(n_estimators=40, random_state=1)
+    rf_clf3 = RandomForestClassifier(n_estimators=60, random_state=1)
+    rf_clf4 = RandomForestClassifier(n_estimators=100, random_state=1)
+    rf_clf5 = RandomForestClassifier(n_estimators=300, random_state=1)
+    rf_clf6 = RandomForestClassifier(n_estimators=400, random_state=1)
+    dt_clf = DecisionTreeClassifier()
+    adaboost_clf = AdaBoostClassifier(n_estimators=30, random_state=1)
+    adaboost_clf2 = AdaBoostClassifier(n_estimators=50, random_state=1)
+    adaboost_clf3 = AdaBoostClassifier(n_estimators=80, random_state=1)
+    adaboost_clf4 = AdaBoostClassifier(n_estimators=300, random_state=1)
+    svm_clf = SVC(kernel="poly", degree=4, random_state=1)
+    svm_clf2 = SVC(kernel="sigmoid", degree=4, random_state=1)
+    svm_clf3 = SVC(kernel="rbf", degree=4, random_state=1)
+    logistics_clf = logistic.LogisticRegression(random_state=1)
+    extra_tree_clf = ExtraTreesClassifier(random_state=1)
+    gb_clf = GradientBoostingClassifier(random_state=1)
+    if n_candidates == 3:
+        ordered_class = [1,2,3]
+    else:
+        ordered_class = [1,2,3,4]
+
+    rfi1_clf = PersonalClassifier(id_index=df.columns.get_loc("VoterID"), classes=ordered_class,
+                                             n_upsample=10, base_classifier=RandomForestClassifier(n_estimators=20, random_state=1))
+    rfi2_clf = PersonalClassifier(id_index=df.columns.get_loc("VoterID"), classes=ordered_class,
+                                             n_upsample=10, base_classifier=RandomForestClassifier(n_estimators=40, random_state=1))
+    rfi3_clf = PersonalClassifier(id_index=df.columns.get_loc("VoterID"), classes=ordered_class,
+                                             n_upsample=10, base_classifier=RandomForestClassifier(n_estimators=60, random_state=1))
+    rfi4_clf = PersonalClassifier(id_index=df.columns.get_loc("VoterID"), classes=ordered_class,
+                                             n_upsample=10, base_classifier=RandomForestClassifier(n_estimators=80, random_state=1))
+
+    personal_nn_clf = PersonalClassifier(id_index=df.columns.get_loc("VoterID"), classes=ordered_class,
+                                             base_classifier=MLPClassifier(hidden_layer_sizes=(50), max_iter=500, random_state=1),
+                                             n_upsample=10,
+                                             general_base_classifier=True)  # RandomForestClassifier(n_estimators=100)  # MLPClassifier(hidden_layer_sizes = (92), max_iter = 500)
+
+    ordinal_clf = OrdinalClassifier(base_classifier = RandomForestClassifier, ordered_class=ordered_class)
+
+    #naive_bayes_clf = sklearn.naive_bayes()
+    # bayesrule_clf = BayesRuleClassifier()
+    # likelihood_clf = LHClassifier()
+    # maxlikelihood_clf = MLHClassifier()
+    if n_candidates == 3:
+        baseline_clf = DecisionTreeBaseline()
+        classifiers = [rf_clf3]#[baseline_clf, extra_tree_clf, gb_clf, rfi1_clf, rfi2_clf, rfi3_clf, rfi4_clf, ordinal_clf ,personal_nn_clf,neural_net_cf,nn_cf_2, nn_cf_3, two_layer_nn_cf, three_layer_nn_cf, rf_clf1,rf_clf2, rf_clf3,rf_clf4,rf_clf5, rf_clf6, dt_clf,adaboost_clf,adaboost_clf2, adaboost_clf3,adaboost_clf4, svm_clf, svm_clf2, svm_clf3,logistics_clf]
+    else:
+        classifiers = [extra_tree_clf, gb_clf, rfi1_clf, rfi2_clf, rfi3_clf, rfi4_clf, ordinal_clf,
+                       personal_nn_clf, neural_net_cf, nn_cf_2, nn_cf_3, two_layer_nn_cf, three_layer_nn_cf, rf_clf1,
+                       rf_clf2, rf_clf3, rf_clf4, rf_clf5, rf_clf6, dt_clf, adaboost_clf, adaboost_clf2, adaboost_clf3,
+                       adaboost_clf4, svm_clf, svm_clf2, svm_clf3, logistics_clf]
+
+    return classifiers
+
+def _load_and_run(datasets, load_folds, scenarios = ['NONE'], is_loo = False, fold_set = [10]):
 
     for dataset in datasets:
         file_path = "datasets/oneshot/" + dataset + ".xlsx"
@@ -192,47 +265,58 @@ def _load_and_run(datasets, load_folds, classifiers, n_candidates, scenarios = [
         for sheet in xls.sheet_names:
             #Get sheet from xlsx
             data = pd.read_excel(file_path, sheet_name=sheet)
+
+            #Take sample from data
+            data = data.sample(frac=0.05,replace=False, random_state=1)
+
             d_df = data.fillna(data.mean())
 
+            n_candidates = d_df.iloc[0]["NumberOfCandidates"]
+            actions_table = pd.read_csv("datasets/oneshot/action_table_N" + str(n_candidates) + ".csv")
+            scenarios_table = pd.read_csv("datasets/oneshot/scenario_table_N" + str(n_candidates) + ".csv")
+            classifiers = _get_classifiers(d_df, n_candidates)
+
             #Prepare folds
-            if load_folds == True:
-                folds = _read_roy_folds(open("datasets/oneshot/"+dataset+"_folds.txt", "r"))
-            else:
-                if is_loo == True:
-                    folds = _get_loo_folds(d_df)
+            for n_folds in fold_set:
+                if load_folds == True:
+                    folds = _read_roy_folds(open("datasets/oneshot/"+dataset+"_folds.txt", "r"))
                 else:
-                    folds = _get_k_folds(d_df, n_folds)
+                    if is_loo == True:
+                        folds = _get_loo_folds(d_df)
+                    else:
+                        folds = _get_k_folds(d_df, n_folds)
 
-            for scenario in scenarios:  # ['A','B','C','D','E','F','NONE']:
-                raw_data = d_df.copy()
+                for scenario in scenarios:  # ['A','B','C','D','E','F','NONE']:
+                    raw_data = d_df.copy()
+                    d_performance_df, d_pred = _evaluation(raw_data, classifiers, 'Action', folds, scenario, actions_table, scenarios_table, n_candidates)
+                    d_performance_df.to_csv("Results\\" + dataset + "_" + sheet + "_performance_df_" + scenario + "_" + str(n_folds) + ".csv")
+                    d_pred.to_csv("Results\\" + dataset + "_" + sheet + "_pred_" + scenario + "_" + str(n_folds) + ".csv")
 
-                d_performance_df, d_pred = _evaluation(raw_data, classifiers, 'Action', folds, scenario, actions_table, scenarios_table, n_candidates)
-                d_performance_df.to_csv("Results\\" + dataset + "_" + sheet + "_performance_df_" + scenario + ".csv")
-                d_pred.to_csv("Results\\" + dataset + "_" + sheet + "_pred_" + scenario + ".csv")
     pass
 
 
 #---------------------------------- Classifiers Definition ------------------------------------#
-# personal_rf_clf = PersonalClassifier(id_index=raw_data.columns.get_loc("VoterID"), n_upsample=3)#RandomForestClassifier(n_estimators=100)  # MLPClassifier(hidden_layer_sizes = (92), max_iter = 500)
-# personal_nn_clf = PersonalClassifier(id_index=raw_data.columns.get_loc("VoterID"), base_classifier=MLPClassifier(hidden_layer_sizes = (92), max_iter = 500), n_upsample=10, general_base_classifier=True)#RandomForestClassifier(n_estimators=100)  # MLPClassifier(hidden_layer_sizes = (92), max_iter = 500)
-# neural_net_cf = MLPClassifier(hidden_layer_sizes = (92), max_iter = 500)
-rf_clf = RandomForestClassifier(n_estimators=100)
-# dt_clf = DecisionTreeClassifier()
-# adaboost_clf = AdaBoostClassifier(n_estimators=200)
-# svm_clf = SVC()
-# logistics_clf = logistic.LogisticRegression()
-#ordinal_clf = OrdinalClassifier(base_classifier = RandomForestClassifier(n_estimators=100))
-#baseline_clf = DecisionTreeBaseline()
-# bayesrule_clf = BayesRuleClassifier()
-# likelihood_clf = LHClassifier()
-# maxlikelihood_clf = MLHClassifier()
 
-classifiers = [rf_clf]  # ,personal_nn_clf,neural_net_cf, rf_clf,dt_clf,adaboost_clf, svm_clf,logistics_clf]
 #---------------------------------- Classifiers Definition ------------------------------------#
 #----------------------------------- Dataset definition ---------------------------------------#
 # datasets: ["schram"]#["d36_2_folds","d36_4_folds","d36_6_folds","d32_2_folds","d32_4_folds","d32_6_folds"]
-datasets = ["schram"]
-n_candidates = 3
+# datasets = ["schram"]
+# n_candidates = 3
+#
+# _load_and_run(datasets=datasets, load_folds=True, classifiers=classifiers, n_candidates=n_candidates)
+#
+datasets = ["d36_updated_train"]#["schram_train","tal_train","d36_updated_train","d32_updated_train","N4_first_90_train"] #["N4_first_90", "d32_updated", "d36_updated", "tal", "schram"]#["N4_first_90_sample", "d32_updated_sample", "d36_updated_sample", "tal_sample", "schram_sample"]#["N4_first_90", "d32_updated", "d36_updated", "tal", "schram"]
+fold_set = [10]#, 10]
+_load_and_run(datasets=datasets, load_folds=False, fold_set=fold_set)
+#
 
-_load_and_run(datasets=datasets, load_folds=True, classifiers=classifiers, n_candidates=n_candidates)
-
+# datasets = ["N4_first_90", "d32_updated", "d36_updated", "tal", "schram", "N4_first_90_train", "d32_updated_train", "d36_updated_train", "tal_train", "schram_train"]
+# for dataset in datasets:
+#     file_path = "datasets/oneshot/PartionedDatasets/Original/" + dataset + ".xlsx"
+#     xls = pd.ExcelFile(file_path)
+#     for sheet in xls.sheet_names:
+#         #Get sheet from xlsx
+#         data = pd.read_excel(file_path, sheet_name=sheet)
+#         data_train, data_test = train_test_split(data, random_state=1, test_size=0.2)
+#         data_train.to_excel("datasets\\oneshot\\PartionedDatasets\\" + dataset + "_train.xlsx")
+#         data_test.to_excel("datasets\\oneshot\\PartionedDatasets\\" + dataset + "_test.xlsx")

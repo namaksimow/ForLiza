@@ -16,7 +16,7 @@ def _transform_data(ordered_class, class_value, y):
     """" private function used to transform the data into len(ordered_classes)-1 derived datasets of binary classification problems
         returns a pair of (class_value, derived_y)
     """
-    ordered_class = ordered_class.tolist()
+    ordered_class = ordered_class#.tolist()
     y_derived = [int(ordered_class.index(i) > ordered_class.index(class_value)) for i in y]
 
     return y_derived

@@ -19,6 +19,7 @@ class PersonalClassifier(with_metaclass(ABCMeta, BaseEnsemble, ClassifierMixin))
 
     def __init__(self,
                  id_index,
+                 classes,
                  base_classifier = RandomForestClassifier(n_estimators=40),
                  n_upsample = 1,
                  general_base_classifier = False):
@@ -26,6 +27,7 @@ class PersonalClassifier(with_metaclass(ABCMeta, BaseEnsemble, ClassifierMixin))
         self.id_index = id_index
         self.personal_classifiers = dict()
         self.n_upsample = n_upsample
+        self.classes = classes
         self.general_base_classifier = general_base_classifier
 
 
@@ -45,14 +47,17 @@ class PersonalClassifier(with_metaclass(ABCMeta, BaseEnsemble, ClassifierMixin))
             X_v = X[X[:,self.id_index] == voter[1][0]]
             y_v = y[X[:,self.id_index] == voter[1][0]]
             combined = np.c_[X_v,y_v]
-            combined_upsample = resample(combined, replace=True, n_samples=self.n_upsample*X_v.shape[0], random_state=0)
-            X_v = combined_upsample[:,0:X_v.shape[1]]
-            y_v = combined_upsample[:,-1]
-            if self.general_base_classifier == True:
-                voter_classifier.partial_fit(X_v, y_v, [1,2,3])
+            if self.n_upsample*(X_v.shape[0]) <= (X_v.shape[0]):
+                print("something's wrong!")
             else:
-                voter_classifier.fit(X_v, y_v)
-            self.personal_classifiers[voter[1][0]] = voter_classifier
+                combined_upsample = resample(combined, replace=True, n_samples=self.n_upsample*(X_v.shape[0]), random_state=0)
+                X_v = combined_upsample[:,0:X_v.shape[1]]
+                y_v = combined_upsample[:,-1]
+                if self.general_base_classifier == True:
+                    voter_classifier.partial_fit(X_v, y_v, self.classes)
+                else:
+                    voter_classifier.fit(X_v, y_v)
+                self.personal_classifiers[voter[1][0]] = voter_classifier
         return self
 
     def predict(self, X):

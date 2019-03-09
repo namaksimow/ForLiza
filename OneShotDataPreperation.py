@@ -38,7 +38,7 @@ def _data_conversion(data_df, is_target, le):
         for c in data_df.columns:
             if data_df[c].dtype in (object, str, np.object, bool):
                 if not (data_df[c].dtype in (int, float)):
-                    data_df[c] = le.fit_transform(data_df[c])
+                    data_df.loc[:,c] = le.fit_transform(data_df.loc[:,c])
     return data_df
 
 class OneShotDataPreparation():
@@ -49,7 +49,7 @@ class OneShotDataPreparation():
     def _prepare_dataset(features_df):
         le = sklearn.preprocessing.LabelEncoder()
         features_encoded_df = pd.DataFrame(
-            preprocessing.normalize(preprocessing.scale(_data_conversion(features_df, False, le).as_matrix()), axis=0,
+            preprocessing.normalize(preprocessing.scale(_data_conversion(features_df, False, le).values), axis=0,
                                     norm='max'))
 
         # target_le = sklearn.preprocessing.LabelEncoder()

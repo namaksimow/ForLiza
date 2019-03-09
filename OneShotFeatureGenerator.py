@@ -1,15 +1,26 @@
 import numbers
+from OneShotDataPreperation import OneShotDataPreparation
 import numpy as np
 import pandas as pd
 import sklearn
 from scipy.stats import kurtosis
 from scipy.stats import skew
+from sklearn.feature_selection import RFE
+import matplotlib
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 from sklearn.ensemble.forest import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neural_network import MLPClassifier
 from keras.layers import Input, Dense
 from keras.models import Model
+
+from numpy.random import seed
+seed(1)
+from tensorflow import set_random_seed
+set_random_seed(2)
+
 
 from datetime import datetime
 # Model and feature selection
@@ -28,6 +39,7 @@ from sklearn.ensemble import AdaBoostClassifier
 from sklearn.ensemble import VotingClassifier
 from sklearn.svm import SVC
 from sklearn.linear_model import logistic
+from sklearn.ensemble import RandomForestRegressor
 
 
 def _autoencode(features):
@@ -44,10 +56,10 @@ def _autoencode(features):
     #    decoder_layer = autoencoder.layers[-1]
     #   decoder = Model(encoded_input, decoder_layer(encoded_input))
 
-    autoencoder.compile(optimizer='adadelta', loss='MSE')
+    autoencoder.compile(optimizer='adam', loss='MSE')
 
     autoencoder.fit(features, features,
-                    epochs=150,
+                    epochs=20,
                     batch_size=256,
                     shuffle=True, verbose=False)
 
@@ -110,12 +122,12 @@ class OneShotFeatureGenerator():
 
         return scenarios
 
-    def _generate_action_name(self, df):
-        # Generate action name
-        df['Action_name'] = [self._get_action_name(df, x[0]) for x in
-                          df.iterrows()]
-
-        return df
+    # def _generate_action_name(self, df):
+    #     # Generate action name
+    #     df['Action_name'] = [self._get_action_name(df, x[0]) for x in
+    #                       df.iterrows()]
+    #
+    #     return df
 
     def _get_action_name(self, vote_row):
         action_name = (self.actions_df.loc[(self.actions_df.scenario == vote_row['Scenario']) & (
@@ -184,7 +196,7 @@ class OneShotStaticFeatureGenerator(OneShotFeatureGenerator):
             for index in range(0, len(combined)):
                 column_name = "Pref" + str(combined["pref"][index]) + "_pos"
                 column_value = index + 1
-                df.loc[df['VoterID'] == vote[1].VoterID,column_name] = int(column_value)
+                df.loc[vote[0],column_name] = int(column_value)
 
 
         return df
@@ -355,7 +367,7 @@ class OneShotDynamicFeatureGenerator(OneShotFeatureGenerator):
     def _dynamic_feature_generation(self, df, X_train, y_train):
         X = df
         a_ratio_columns, gaps_columns = [], []
-        all_voters = pd.DataFrame(X[["VoterID", "SessionIDX"]].drop_duplicates())
+        all_voters = pd.DataFrame(X["VoterID"].drop_duplicates())
         for voter in all_voters.iterrows():
             before_columns = len(X.columns)
             X = self._generate_A_ratios(X, X_train, y_train, voter[1])
@@ -384,18 +396,72 @@ class OneShotDynamicFeatureGenerator(OneShotFeatureGenerator):
         for gap_pref_feature in gap_pref_features:
             total_gaps_columns.append(X.columns.get_loc(gap_pref_feature))
 
-        normalized_gap_fs = pd.DataFrame(preprocessing.normalize(X.iloc[:, total_gaps_columns]))
+        total_gaps_columns.append(X.columns.get_loc("Scenario"))
+        total_gaps_columns.append(X.columns.get_loc("Scenario_type"))
+        total_gaps_columns.append(X.columns.get_loc("VoterID"))
+
+        normalized_gap_fs = pd.DataFrame(preprocessing.normalize(OneShotDataPreparation._prepare_dataset(X.iloc[:, total_gaps_columns])))
+
+        #Try auto encode each voter separately
+        # encoded_gap_fs = pd.DataFrame()
+        #
+        # for voter in all_voters.iterrows():
+        #     voter_index = X.loc[X['VoterID'] == voter[1].VoterID].index
+        #     voter_encoded_gap_fs = pd.DataFrame(_autoencode(normalized_gap_fs.iloc[voter_index.tolist(),:]))
+        #     voter_encoded_gap_fs.index = voter_index
+        #
+        #     # aggregate results
+        #     if len(encoded_gap_fs) == 0:
+        #         encoded_gap_fs = pd.DataFrame(voter_encoded_gap_fs)
+        #     else:
+        #         encoded_gap_fs = pd.concat([encoded_gap_fs, pd.DataFrame(voter_encoded_gap_fs)])
+        #
+        # encoded_gap_fs = pd.DataFrame(encoded_gap_fs)
+        #
+        # X = pd.concat([X, encoded_gap_fs], axis=1, join='inner')
+
+
+
         encoded_gap_fs = pd.DataFrame(_autoencode(normalized_gap_fs))
+
+
 
         X = pd.concat([X, encoded_gap_fs], axis=1, join='inner')
 
-        X = X.drop(X.columns[gaps_columns + gaps_dif_columns], axis=1)
+        #X = X.drop(X.columns[gaps_columns + gaps_dif_columns], axis=1)
 
         X = self._generate_is_random_voter(X)
         X = self._generate_voter_type(X)
 
-        return X
+        # plt.figure(figsize=(12, 10))
+        # cor = df.corr()
+        # sns.heatmap(cor, annot=True, cmap=plt.cm.Reds)
+        # plt.show()
 
+        # Correlation with output variable
+        cor_target = abs(pd.concat([X.loc[X_train.index].drop(["Action"],axis=1), y_train], axis=1, join='inner').corr()["Action"])
+        # Selecting highly correlated features
+        relevant_features = cor_target[cor_target > 0.4]
+        print(relevant_features)
+
+        cols = list(X.columns)
+        model = RandomForestRegressor(random_state=1)
+        # Initializing RFE model
+        rfe = RFE(model, 20)
+        # Transforming data using RFE
+        #data_trans = X.loc[X_train.index].fillna( X.loc[X_train.index].mean())
+        #OneShotDataPreparation._prepare_dataset(X["VoterType"])
+        #OneShotDataPreparation._prepare_dataset(X["Scenario_type"])
+        X_rfe = rfe.fit_transform(OneShotDataPreparation._prepare_dataset(X.loc[[x in X_train.index for x in X.index.tolist()]]), y_train)
+        # Fitting the data to model
+        model.fit(X_rfe, y_train)
+        temp = pd.Series(rfe.support_, index=cols)
+        selected_features_rfe = temp[temp == True].index
+        X = X.drop(X.columns[[not (x in selected_features_rfe) for x in X.columns]].tolist(), axis=1)
+        print(selected_features_rfe)
+
+        return X
+RandomForestRegressor
 
 
 
