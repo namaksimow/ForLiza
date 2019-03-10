@@ -56,10 +56,10 @@ def _autoencode(features):
     #    decoder_layer = autoencoder.layers[-1]
     #   decoder = Model(encoded_input, decoder_layer(encoded_input))
 
-    autoencoder.compile(optimizer='adam', loss='MSE')
+    autoencoder.compile(optimizer='adadelta', loss='MSE')
 
     autoencoder.fit(features, features,
-                    epochs=20,
+                    epochs=20, #tried 20
                     batch_size=256,
                     shuffle=True, verbose=False)
 
@@ -269,19 +269,19 @@ class OneShotDynamicFeatureGenerator(OneShotFeatureGenerator):
 
         return action_counter
 
-    def _generate_A_ratios(self, df, X_train, y_train ,voter):
+    def _generate_A_ratios(self, df, X_train, y_train ,voter_index):
         """Generate A ratios - That is TRT-ratio, CMP-ratio, WLB-ratio, SLB-ratio, DOM-ratio
             Action is in {TRT,DLB,SLB,WLB,CMP,DOM}
             Scenario is in {A,B,C,D,E,F}
         """
 
-        voter_df = pd.concat([X_train.loc[X_train['VoterID'] == voter.VoterID,] , y_train], axis=1, join='inner')
+        voter_df = pd.concat([X_train.loc[X_train.index & voter_index], y_train], axis=1, join='inner')
 
         for action in self._get_actions():
             availability_counter = np.count_nonzero([x[1].Scenario in self._get_scenarios_by_action(action) for x in voter_df.iterrows()])
             action_counter = self._count_action_for_voter(action, voter_df)
-            df.loc[df['VoterID'] == voter.VoterID, action + '-ratio'] = float(action_counter/availability_counter if availability_counter > 0 else 0)
-            df.loc[df['VoterID'] == voter.VoterID, action + '-counter'] = float(action_counter)
+            df.loc[voter_index, action + '-ratio'] = float(action_counter/availability_counter if availability_counter > 0 else 0)
+            df.loc[voter_index, action + '-counter'] = float(action_counter)
 
         return df
 
@@ -302,22 +302,29 @@ class OneShotDynamicFeatureGenerator(OneShotFeatureGenerator):
 
 
 
-    def _generate_feature_aggregation_class_dependant(self, df, X_train, y_train, scenarios, voter, feature_name, aggregation_func):
+    def _generate_feature_aggregation_class_dependant(self, df, X_train, y_train, scenarios, voter_index, feature_name, aggregation_func):
 
         X = df
-        X_train, y_train = X_train.loc[X_train['Scenario'].isin(scenarios)], y_train.loc[X_train['Scenario'].isin(scenarios)]
+        #X_train, y_train = X_train.loc[X_train['Scenario'].isin(scenarios)], y_train.loc[X_train['Scenario'].isin(scenarios)]
 
         #X_train, y_train = X_train, y_train #X.drop([self.target_index], axis=1),X[self.target_index]
 
-        for action in range(1, self.n_candidates + 1):
-            actioni_list = [float(x[1][feature_name]) for x in
-                            X_train.loc[(X_train['VoterID'] == voter.VoterID) & (y_train == action)].iterrows()]
-            if len(actioni_list) > 0:
-                X.loc[X['VoterID'] == voter.VoterID, feature_name + '_action'+ str(action) + '_' + aggregation_func.__name__] = aggregation_func(
-                    actioni_list)
+
+
+
+        voter_train = X_train.loc[X_train.index & voter_index]
+        voter_train = voter_train.loc[voter_train["Scenario"].isin(scenarios)]
+        voter_targets = y_train.loc[voter_train.index]
+        if len(voter_train) > 0:
+            for action in range(1, self.n_candidates + 1):
+                actioni_list = [float(x[1][feature_name]) for x in
+                                voter_train.loc[voter_targets == action,:].iterrows()]
+                if len(actioni_list) > 0:
+                    X.loc[voter_index, feature_name + '_action'+ str(action) + '_' + aggregation_func.__name__] = aggregation_func(
+                        actioni_list)
         return X
 
-    def _generate_action_aggregation_features(self, df, X_train, y_train, voter):
+    def _generate_action_aggregation_features(self, df, X_train, y_train, voter_index):
         X = df
 
         aggregators = [np.average, np.std, np.median]
@@ -325,17 +332,17 @@ class OneShotDynamicFeatureGenerator(OneShotFeatureGenerator):
 
         scenarios = self._get_scenarios_by_actions(self._get_strategic_actions())
 
-        X_train, y_train = X_train.loc[X_train['Scenario'].isin(scenarios)], y_train.loc[X_train['Scenario'].isin(scenarios)]
-
-        voter_train = X_train.loc[(X_train['VoterID'] == voter.VoterID)]
+        voter_train = X_train.loc[X_train.index & voter_index]
+        voter_train = voter_train.loc[voter_train["Scenario"].isin(scenarios)]
+        voter_targets = y_train.loc[voter_train.index]
 
         for aggregation_func in aggregators:
-            X.loc[X['VoterID'] == voter.VoterID, feature_name + "_" + aggregation_func.__name__] = aggregation_func(
-                [float(y_train[x[0]]) for x in voter_train.iterrows()])
+            X.loc[voter_index, feature_name + "_" + aggregation_func.__name__] = aggregation_func(
+                [float(voter_targets[x[0]]) for x in voter_train.iterrows()])
 
         return X
 
-    def _generate_gaps_features(self, df, X_train, y_train, voter):
+    def _generate_gaps_features(self, df, X_train, y_train, voter_index):
         X = df
 
         features = self._get_gap_pref_features()
@@ -344,7 +351,7 @@ class OneShotDynamicFeatureGenerator(OneShotFeatureGenerator):
 
         for aggregator in aggregators:
             for feature in features:
-                X = self._generate_feature_aggregation_class_dependant(X, X_train, y_train, scenarios, voter, feature, aggregator)
+                X = self._generate_feature_aggregation_class_dependant(X, X_train, y_train, scenarios, voter_index, feature, aggregator)
 
         return X
 
@@ -369,18 +376,19 @@ class OneShotDynamicFeatureGenerator(OneShotFeatureGenerator):
         a_ratio_columns, gaps_columns = [], []
         all_voters = pd.DataFrame(X["VoterID"].drop_duplicates())
         for voter in all_voters.iterrows():
+            voter_index = X.loc[X['VoterID'] == voter[1].VoterID,].index
             before_columns = len(X.columns)
-            X = self._generate_A_ratios(X, X_train, y_train, voter[1])
+            X = self._generate_A_ratios(X, X_train, y_train, voter_index)
             if len(a_ratio_columns) == 0:
                 a_ratio_columns = list(range(before_columns, len(X.columns)))
 
             before_columns = len(X.columns)
-            X = self._generate_gaps_features(X, X_train, y_train, voter[1])
+            X = self._generate_gaps_features(X, X_train, y_train, voter_index)
             if len(gaps_columns) == 0:
                 gaps_columns = list(range(before_columns, len(X.columns)))
 
 
-            X = self._generate_action_aggregation_features(X, X_train, y_train, voter[1])
+            X = self._generate_action_aggregation_features(X, X_train, y_train, voter_index)
 
         # Gaps features encoding
         X = X.fillna(
@@ -402,31 +410,31 @@ class OneShotDynamicFeatureGenerator(OneShotFeatureGenerator):
 
         normalized_gap_fs = pd.DataFrame(preprocessing.normalize(OneShotDataPreparation._prepare_dataset(X.iloc[:, total_gaps_columns])))
 
-        #Try auto encode each voter separately
-        # encoded_gap_fs = pd.DataFrame()
-        #
-        # for voter in all_voters.iterrows():
-        #     voter_index = X.loc[X['VoterID'] == voter[1].VoterID].index
-        #     voter_encoded_gap_fs = pd.DataFrame(_autoencode(normalized_gap_fs.iloc[voter_index.tolist(),:]))
-        #     voter_encoded_gap_fs.index = voter_index
-        #
-        #     # aggregate results
-        #     if len(encoded_gap_fs) == 0:
-        #         encoded_gap_fs = pd.DataFrame(voter_encoded_gap_fs)
-        #     else:
-        #         encoded_gap_fs = pd.concat([encoded_gap_fs, pd.DataFrame(voter_encoded_gap_fs)])
-        #
-        # encoded_gap_fs = pd.DataFrame(encoded_gap_fs)
-        #
-        # X = pd.concat([X, encoded_gap_fs], axis=1, join='inner')
-
-
-
         encoded_gap_fs = pd.DataFrame(_autoencode(normalized_gap_fs))
 
-
-
+        encoded_gap_fs.index = X.index
         X = pd.concat([X, encoded_gap_fs], axis=1, join='inner')
+
+
+        # #Try auto encode each voter separately
+        # # encoded_gap_fs = pd.DataFrame()
+        # #
+        # # for voter in all_voters.iterrows():
+        # #     voter_index = X.loc[X['VoterID'] == voter[1].VoterID].index
+        # #     voter_encoded_gap_fs = pd.DataFrame(_autoencode(normalized_gap_fs.iloc[voter_index.tolist(),:]))
+        # #     voter_encoded_gap_fs.index = voter_index
+        # #
+        # #     # aggregate results
+        # #     if len(encoded_gap_fs) == 0:
+        # #         encoded_gap_fs = pd.DataFrame(voter_encoded_gap_fs)
+        # #     else:
+        # #         encoded_gap_fs = pd.concat([encoded_gap_fs, pd.DataFrame(voter_encoded_gap_fs)])
+        # #
+        # # encoded_gap_fs = pd.DataFrame(encoded_gap_fs)
+        # #
+        # # X = pd.concat([X, encoded_gap_fs], axis=1, join='inner')
+        #
+
 
         #X = X.drop(X.columns[gaps_columns + gaps_dif_columns], axis=1)
 
@@ -439,29 +447,15 @@ class OneShotDynamicFeatureGenerator(OneShotFeatureGenerator):
         # plt.show()
 
         # Correlation with output variable
-        cor_target = abs(pd.concat([X.loc[X_train.index].drop(["Action"],axis=1), y_train], axis=1, join='inner').corr()["Action"])
-        # Selecting highly correlated features
-        relevant_features = cor_target[cor_target > 0.4]
-        print(relevant_features)
+        # cor_target = abs(pd.concat([X.loc[X_train.index], y_train], axis=1, join='inner').corr()["Action"])
+        # # Selecting highly correlated features
+        # relevant_features = cor_target[cor_target > 0.4]
+        # print(relevant_features)
+        #
 
-        cols = list(X.columns)
-        model = RandomForestRegressor(random_state=1)
-        # Initializing RFE model
-        rfe = RFE(model, 20)
-        # Transforming data using RFE
-        #data_trans = X.loc[X_train.index].fillna( X.loc[X_train.index].mean())
-        #OneShotDataPreparation._prepare_dataset(X["VoterType"])
-        #OneShotDataPreparation._prepare_dataset(X["Scenario_type"])
-        X_rfe = rfe.fit_transform(OneShotDataPreparation._prepare_dataset(X.loc[[x in X_train.index for x in X.index.tolist()]]), y_train)
-        # Fitting the data to model
-        model.fit(X_rfe, y_train)
-        temp = pd.Series(rfe.support_, index=cols)
-        selected_features_rfe = temp[temp == True].index
-        X = X.drop(X.columns[[not (x in selected_features_rfe) for x in X.columns]].tolist(), axis=1)
-        print(selected_features_rfe)
 
         return X
-RandomForestRegressor
+
 
 
 
