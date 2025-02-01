@@ -7,24 +7,19 @@ Created on Fri Aug 17 11:16:03 2018
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble.forest import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.feature_selection import RFE
-
-from datetime import datetime
-# Model and feature selection
 from sklearn.model_selection import KFold
-# Classification metrics
 from sklearn.metrics import f1_score
 from sklearn.metrics import precision_score
 from sklearn.metrics import recall_score
 from sklearn.metrics import accuracy_score
-
 from PersonalClassifier import PersonalClassifier
 from sklearn.ensemble import AdaBoostClassifier
 from sklearn.svm import SVC
-from sklearn.linear_model import logistic
+from sklearn.linear_model import LogisticRegression
 from OneShotFeatureGenerator import OneShotStaticFeatureGenerator
 from OneShotFeatureGenerator import OneShotDynamicFeatureGenerator
 from OneShotDataPreperation import OneShotDataPreparation
@@ -32,9 +27,7 @@ from OrdinalClassifier import OrdinalClassifier
 from ExpertModels import DecisionTreeBaseline
 from sklearn.ensemble import ExtraTreesClassifier
 from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.linear_model import LinearRegression
 
-from sklearn.model_selection import train_test_split
 
 def _convert_prediction(X, column_name, n_candidates):
     X.loc[X[column_name]==1,"Vote_"+column_name] = X.loc[X[column_name]==1,"Pref1"]
@@ -272,7 +265,7 @@ def _get_classifiers(df, n_candidates):
     svm_clf = SVC(kernel="poly", degree=4, random_state=1)
     svm_clf2 = SVC(kernel="sigmoid", degree=4, random_state=1)
     svm_clf3 = SVC(kernel="rbf", degree=4, random_state=1)
-    logistics_clf = logistic.LogisticRegression(random_state=1)
+    logistics_clf = LogisticRegression(random_state=1)
     extra_tree_clf = ExtraTreesClassifier(random_state=1)
     gb_clf = GradientBoostingClassifier(random_state=1)
     if n_candidates == 3:

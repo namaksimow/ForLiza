@@ -10,19 +10,10 @@ import pandas as pd
 import sklearn
 from scipy.stats import kurtosis
 from scipy.stats import skew
-from keras.layers import Input, Dense
-from keras.models import Model
-
-from sklearn.ensemble.forest import RandomForestClassifier
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.neural_network import MLPClassifier
-
-from datetime import datetime
-# Model and feature selection
-from sklearn.feature_selection import SelectKBest
+from tensorflow.python.keras.layers import Input, Dense
+from tensorflow.python.keras.models import Model
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import KFold
-from sklearn.feature_selection import chi2
-# Classification metrics
 from sklearn.metrics import f1_score
 from sklearn.metrics import precision_score
 from sklearn.metrics import recall_score
@@ -30,10 +21,7 @@ from sklearn.metrics import accuracy_score
 
 from sklearn import preprocessing
 from PersonalClassifier import PersonalClassifier
-from sklearn.ensemble import AdaBoostClassifier
-from sklearn.ensemble import VotingClassifier
-from sklearn.svm import SVC
-from sklearn.linear_model import logistic
+
 
 def _convert_prediction(X, column_name):
     X.loc[X[column_name]==1,"Vote_"+column_name] = X.loc[X[column_name]==1,"Pref1"]

@@ -10,30 +10,22 @@ import pandas as pd
 import sklearn
 from scipy.stats import kurtosis
 from scipy.stats import skew
-
-from sklearn.ensemble.forest import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neural_network import MLPClassifier
-from keras.layers import Input, Dense
-from keras.models import Model
-
-from datetime import datetime
-# Model and feature selection
-from sklearn.feature_selection import SelectKBest
+from tensorflow.python.keras.layers import Input, Dense
+from tensorflow.python.keras.models import Model
 from sklearn.model_selection import KFold
-from sklearn.feature_selection import chi2
-# Classification metrics
 from sklearn.metrics import f1_score
 from sklearn.metrics import precision_score
 from sklearn.metrics import recall_score
 from sklearn.metrics import accuracy_score
-
 from sklearn import preprocessing
 from PersonalClassifier import PersonalClassifier
 from sklearn.ensemble import AdaBoostClassifier
 from sklearn.ensemble import VotingClassifier
 from sklearn.svm import SVC
-from sklearn.linear_model import logistic
+from sklearn.linear_model import LogisticRegression
 
 def _convert_prediction(X):
     X.loc[X['Prediction']==1,"VotePrediction"] = X.loc[X['Prediction']==1,"Pref1"]
@@ -674,7 +666,7 @@ for scenario in ['NONE']:#['A','B','C','D','E','F','NONE']:
     dt_clf = DecisionTreeClassifier()
     adaboost_clf = AdaBoostClassifier(n_estimators=200)
     svm_clf = SVC()
-    logistics_clf = logistic.LogisticRegression()
+    logistics_clf = LogisticRegression()
 
     classifiers = [personal_rf_clf, personal_nn_clf, neural_net_cf, rf_clf, dt_clf, adaboost_clf, svm_clf, logistics_clf]
 

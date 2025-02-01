@@ -1,16 +1,13 @@
-import numbers
 import numpy as np
-import sklearn
 import pandas as pd
-
 from six import with_metaclass
 from abc import ABCMeta
 from sklearn.base import ClassifierMixin
-from sklearn.ensemble.base import BaseEnsemble
-from sklearn.base import clone
+from sklearn.ensemble import BaseEnsemble
 from copy import deepcopy
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.utils import resample
+
 
 class PersonalClassifier(with_metaclass(ABCMeta, BaseEnsemble, ClassifierMixin)):
     """Base class for oneshot personal clasifier ensemble 

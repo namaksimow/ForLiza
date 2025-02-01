@@ -2,10 +2,11 @@ import numpy as np
 import pandas as pd
 import sklearn
 from datetime import datetime
+
 # Classification models
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble.forest import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.svm import SVC
 from OrdinalClassifier import OrdinalClassifier
 from OneShotFeatureGenerator import OneShotFeatureGenerator

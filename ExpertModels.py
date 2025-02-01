@@ -5,8 +5,10 @@ import pandas as pd
 
 from sklearn.utils import check_X_y, check_array, column_or_1d
 from sklearn.utils.multiclass import check_classification_targets
+import sklearn.exceptions
+import joblib
 
-from sklearn.externals.joblib import Parallel, delayed #For parallel computing TODO: check if we need to be parallel or not
+from joblib import Parallel, delayed  # Исправленный импорт
 from sklearn.utils.validation import has_fit_parameter, check_is_fitted
 
 def _extract_num_votes(V_i):

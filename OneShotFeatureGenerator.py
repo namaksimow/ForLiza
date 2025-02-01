@@ -1,45 +1,23 @@
-import numbers
-from OneShotDataPreperation import OneShotDataPreparation
 import numpy as np
 import pandas as pd
-import sklearn
-from scipy.stats import kurtosis
-from scipy.stats import skew
-from sklearn.feature_selection import RFE
-import matplotlib
-import matplotlib.pyplot as plt
-import seaborn as sns
+from scipy.stats import kurtosis, skew
+from sklearn import preprocessing
+from tensorflow.python.keras.layers import Input, Dense
+from tensorflow.python.keras.models import Model
 
-from sklearn.ensemble.forest import RandomForestClassifier
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.neural_network import MLPClassifier
-from keras.layers import Input, Dense
-from keras.models import Model
 
+# Для работы с случайными числами
 from numpy.random import seed
 seed(1)
-from tensorflow import set_random_seed
-set_random_seed(2)
-
+from tensorflow.random import set_seed
+set_seed(2)
 
 from datetime import datetime
-# Model and feature selection
-from sklearn.feature_selection import SelectKBest
-from sklearn.model_selection import KFold
-from sklearn.feature_selection import chi2
-# Classification metrics
-from sklearn.metrics import f1_score
-from sklearn.metrics import precision_score
-from sklearn.metrics import recall_score
-from sklearn.metrics import accuracy_score
 
-from sklearn import preprocessing
+# Импорт из локальных файлов
+from OneShotDataPreperation import OneShotDataPreparation
 from PersonalClassifier import PersonalClassifier
-from sklearn.ensemble import AdaBoostClassifier
-from sklearn.ensemble import VotingClassifier
-from sklearn.svm import SVC
-from sklearn.linear_model import logistic
-from sklearn.ensemble import RandomForestRegressor
+
 
 
 def _autoencode(features):

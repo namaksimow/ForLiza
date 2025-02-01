@@ -1,16 +1,12 @@
 import numbers
 import numpy as np
 import sklearn
-
 from six import with_metaclass
 from abc import ABCMeta
 from sklearn.base import ClassifierMixin
-from sklearn.ensemble.base import BaseEnsemble
+from sklearn.ensemble import BaseEnsemble
 from sklearn.utils import check_X_y, check_array, column_or_1d
 from sklearn.utils.multiclass import check_classification_targets
-
-from sklearn.externals.joblib import Parallel, delayed #For parallel computing TODO: check if we need to be parallel or not
-from sklearn.utils.validation import has_fit_parameter, check_is_fitted
 
 def _transform_data(ordered_class, class_value, y):
     """" private function used to transform the data into len(ordered_classes)-1 derived datasets of binary classification problems

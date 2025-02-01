@@ -33,7 +33,7 @@ from PersonalClassifier import PersonalClassifier
 from sklearn.ensemble import AdaBoostClassifier
 from sklearn.ensemble import VotingClassifier
 from sklearn.svm import SVC
-from sklearn.linear_model import logistic
+from sklearn.linear_model import LogisticRegression
 
 def _convert_prediction(X):
     X.loc[X['Prediction']==1,"VotePrediction"] = X.loc[X['Prediction']==1,"Pref1"]
